@@ -27,8 +27,8 @@ app.add_middleware(
     logger=logger,
 )
 
-DATABASE_URL = os.environ["MONGODB_URL"]
-DATABASE_NAME = os.environ["MONGODB_DATABASE_NAME"]
+DATABASE_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DATABASE_NAME = os.getenv("MONGODB_DATABASE_NAME", "default_db_name")
 REDIS_URL = os.getenv("REDIS_URL", None)
 
 
