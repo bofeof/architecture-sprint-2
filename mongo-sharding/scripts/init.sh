@@ -33,7 +33,6 @@ rs.initiate({
   log_success "Config-сервер инициализирован"
 else
   log_error "Ошибка при инициализации config-сервера"
- 
 fi
 
 sleep 10
@@ -47,7 +46,6 @@ rs.initiate({
   log_success "shard1 инициализирован"
 else
   log_error "Ошибка при инициализации shard1"
- 
 fi
 
 sleep 10
@@ -81,6 +79,7 @@ fi
 
 sleep 10
 
+
 log_info "Проверка shard1"
 if docker exec shard1 mongosh --port 27018 --eval '
 db = db.getSiblingDB("somedb");
@@ -111,7 +110,6 @@ if [ $? -eq 0 ]; then
   log_success "Методы доступны, данные с бд можно получить"
 else
   log_error "Методы недоступны, данные с бд нельзя получить"
- 
 fi
 
 log_success "Финиш"
