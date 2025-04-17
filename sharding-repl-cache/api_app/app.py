@@ -56,8 +56,7 @@ PyObjectId = Annotated[str, BeforeValidator(str)]
 @app.on_event("startup")
 async def startup():
     try:
-        # Проверка соединения с MongoDB
-        await client.server_info()  # Проверка доступности MongoDB
+        await client.server_info() 
         logger.info("MongoDB connected successfully.")
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {str(e)}")
@@ -114,7 +113,6 @@ async def root():
         topology_type = topology_description.topology_type_name
         replicaset_name = topology_description.replica_set_name
 
-        # Исправление здесь: используем правильный способ получения серверных адресов
         mongo_nodes = [str(address) for address in topology_description.server_descriptions().keys()]
 
         shards = None
