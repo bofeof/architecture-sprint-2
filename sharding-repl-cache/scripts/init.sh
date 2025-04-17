@@ -111,6 +111,8 @@ else
   log_error "Ошибка при подсчёте документов"
 fi
 
+sleep 3
+
 log_info "Проверка shard1a"
 if docker exec shard1a mongosh --port $SHARD1_RS_PORT --eval "
 db = db.getSiblingDB('$DB_NAME');
@@ -120,6 +122,8 @@ print('Количество документов в shard1a: ' + db.$COLLECTION_
 else
   log_error "Ошибка при проверке shard1a"
 fi
+
+sleep 3
 
 log_info "Проверка shard2a"
 if docker exec shard2a mongosh --port $SHARD2_RS_PORT --eval "
@@ -131,7 +135,7 @@ else
   log_error "Ошибка при проверке shard2a"
 fi
 
-sleep 10
+sleep 3
 
 log_info "Проверка доступности методов в $APP_URL/docs"
 response=$(curl -fs "$APP_URL/$COLLECTION_NAME/count")
@@ -142,6 +146,8 @@ else
   log_error "Методы недоступны, данные с БД нельзя получить"
 fi
 
+sleep 3
+
 log_info "Проверка доступности методов в $APP_URL/"
 response=$(curl -fs "$APP_URL/")
 if [ $? -eq 0 ]; then
@@ -150,6 +156,8 @@ if [ $? -eq 0 ]; then
 else
   log_error "Localhost:8080/ недоступен"
 fi
+
+sleep 3
 
 log_info "Проверка реплик в первом шарде"
 ans=$(docker exec shard1a mongosh --port $SHARD1_RS_PORT --eval "rs.status().members.forEach(m => print(m.name + ' — ' + m.stateStr))")
@@ -160,6 +168,8 @@ else
   log_error "Информацию получить нельзя"
 fi
 
+sleep 3
+
 log_info "Проверка реплик во втором шарде"
 ans=$(docker exec shard2a mongosh --port $SHARD2_RS_PORT --eval "rs.status().members.forEach(m => print(m.name + ' — ' + m.stateStr))")
 if [ $? -eq 0 ]; then
@@ -168,6 +178,8 @@ if [ $? -eq 0 ]; then
 else
   log_error "Информацию получить нельзя"
 fi
+
+sleep 3
 
 log_info "Запуск тестов скорости запросов с использованием кеша. Проверка GET-запроса: $CHECK_URL"
 for i in $(seq 1 $ATTEMPTS); do
