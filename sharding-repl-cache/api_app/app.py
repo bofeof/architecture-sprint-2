@@ -14,7 +14,7 @@ from logmiddleware import RouterLoggingMiddleware, logging_config
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.functional_validators import BeforeValidator
 from pymongo import errors
-from redis import asyncio as aioredis
+from redis.asyncio import Redis
 from typing_extensions import Annotated
 
 # Configure JSON logging
@@ -26,7 +26,7 @@ app.add_middleware(
     RouterLoggingMiddleware,
     logger=logger,
 )
-ы
+
 DATABASE_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("MONGODB_DATABASE_NAME", "default_db_name")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -55,85 +55,108 @@ PyObjectId = Annotated[str, BeforeValidator(str)]
 
 @app.on_event("startup")
 async def startup():
+    try:
+        # Проверка соединения с MongoDB
+        await client.server_info()  # Проверка доступности MongoDB
+        logger.info("MongoDB connected successfully.")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to connect to MongoDB")
+    
     if REDIS_URL:
-        redis = aioredis.from_url(REDIS_URL, encoding="utf8", decode_responses=True)
-        FastAPICache.init(RedisBackend(redis), prefix="api:cache")
+        try:
+            redis = Redis.from_url(REDIS_URL, encoding="utf8", decode_responses=True)
+            FastAPICache.init(RedisBackend(redis), prefix="api:cache")
+            logger.info("Redis connected successfully.")
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to connect to Redis")
 
 
 class UserModel(BaseModel):
     """
     Container for a single user record.
     """
-
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
-    age: int = Field(...)
-    name: str = Field(...)
+    age: int = Field(..., description="User's age")
+    name: str = Field(..., description="User's name")
 
 
 class UserCollection(BaseModel):
     """
     A container holding a list of `UserModel` instances.
     """
-
     users: List[UserModel]
 
 
 @app.get("/")
 async def root():
-    collection_names = await db.list_collection_names()
-    collections = {}
-    for collection_name in collection_names:
-        collection = db.get_collection(collection_name)
-        collections[collection_name] = {
-            "documents_count": await collection.count_documents({})
-        }
     try:
-        replica_status = await client.admin.command("replSetGetStatus")
-        replica_status = json.dumps(replica_status, indent=2, default=str)
-    except errors.OperationFailure:
-        replica_status = "No Replicas"
+        collection_names = await db.list_collection_names()
+        collections = {}
+        for collection_name in collection_names:
+            collection = db.get_collection(collection_name)
+            collections[collection_name] = {
+                "documents_count": await collection.count_documents({})
+            }
+        logger.info("Collections fetched successfully")
 
-    topology_description = client.topology_description
-    read_preference = client.client_options.read_preference
-    topology_type = topology_description.topology_type_name
-    replicaset_name = topology_description.replica_set_name
+        try:
+            replica_status = await client.admin.command("replSetGetStatus")
+            replica_status = json.dumps(replica_status, indent=2, default=str)
+            logger.info("Replica status fetched successfully")
+        except errors.OperationFailure:
+            replica_status = "No Replicas"
+            logger.warning("Failed to get replica status")
 
-    shards = None
-    if topology_type == "Sharded":
-        shards_list = await client.admin.command("listShards")
-        shards = {}
-        for shard in shards_list.get("shards", {}):
-            shards[shard["_id"]] = shard["host"]
+        topology_description = client.topology_description
+        read_preference = client.client_options.read_preference
+        topology_type = topology_description.topology_type_name
+        replicaset_name = topology_description.replica_set_name
 
-    cache_enabled = False
-    if REDIS_URL:
-        cache_enabled = FastAPICache.get_enable()
+        # Исправление здесь: используем правильный способ получения серверных адресов
+        mongo_nodes = [str(address) for address in topology_description.server_descriptions().keys()]
 
-    return {
-        "mongo_topology_type": topology_type,
-        "mongo_replicaset_name": replicaset_name,
-        "mongo_db": DATABASE_NAME,
-        "read_preference": str(read_preference),
-        "mongo_nodes": client.nodes,
-        "mongo_primary_host": client.primary,
-        "mongo_secondary_hosts": client.secondaries,
-        "mongo_address": client.address,
-        "mongo_is_primary": client.is_primary,
-        "mongo_is_mongos": client.is_mongos,
-        "collections": collections,
-        "shards": shards,
-        "cache_enabled": cache_enabled,
-        "status": "OK",
-    }
+        shards = None
+        if topology_type == "Sharded":
+            shards_list = await client.admin.command("listShards")
+            shards = {}
+            for shard in shards_list.get("shards", {}):
+                shards[shard["_id"]] = shard["host"]
+
+        cache_enabled = False
+        if REDIS_URL:
+            cache_enabled = FastAPICache.get_enable()
+
+        return {
+            "mongo_topology_type": topology_type,
+            "mongo_replicaset_name": replicaset_name,
+            "mongo_db": DATABASE_NAME,
+            "read_preference": str(read_preference),
+            "mongo_nodes": mongo_nodes,
+            "mongo_primary_host": client.primary,
+            "mongo_secondary_hosts": client.secondaries,
+            "mongo_is_primary": client.is_primary,
+            "mongo_is_mongos": client.is_mongos,
+            "collections": collections,
+            "shards": shards,
+            "cache_enabled": cache_enabled,
+            "status": "OK",
+        }
+    except Exception as e:
+        logger.error(f"Error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/{collection_name}/count")
 async def collection_count(collection_name: str):
-    collection = db.get_collection(collection_name)
-    items_count = await collection.count_documents({})
-    # status = await client.admin.command('replSetGetStatus')
-    # import ipdb; ipdb.set_trace()
-    return {"status": "OK", "mongo_db": DATABASE_NAME, "items_count": items_count}
+    try:
+        collection = db.get_collection(collection_name)
+        items_count = await collection.count_documents({})
+        return {"status": "OK", "mongo_db": DATABASE_NAME, "items_count": items_count}
+    except Exception as e:
+        logger.error(f"Error occurred while counting documents in collection {collection_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error counting documents: {str(e)}")
 
 
 @app.get(
@@ -144,13 +167,12 @@ async def collection_count(collection_name: str):
 )
 @cache(expire=60 * 1)
 async def list_users(collection_name: str):
-    """
-    List all of the user data in the database.
-    The response is unpaginated and limited to 1000 results.
-    """
-    time.sleep(1)
-    collection = db.get_collection(collection_name)
-    return UserCollection(users=await collection.find().to_list(1000))
+    try:
+        collection = db.get_collection(collection_name)
+        return UserCollection(users=await collection.find().to_list(1000))
+    except Exception as e:
+        logger.error(f"Error occurred while listing users in collection {collection_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error listing users: {str(e)}")
 
 
 @app.get(
@@ -160,15 +182,15 @@ async def list_users(collection_name: str):
     response_model_by_alias=False,
 )
 async def show_user(collection_name: str, name: str):
-    """
-    Get the record for a specific user, looked up by `name`.
-    """
+    try:
+        collection = db.get_collection(collection_name)
+        if (user := await collection.find_one({"name": name})) is not None:
+            return user
 
-    collection = db.get_collection(collection_name)
-    if (user := await collection.find_one({"name": name})) is not None:
-        return user
-
-    raise HTTPException(status_code=404, detail=f"User {name} not found")
+        raise HTTPException(status_code=404, detail=f"User {name} not found")
+    except Exception as e:
+        logger.error(f"Error occurred while fetching user {name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching user: {str(e)}")
 
 
 @app.post(
@@ -179,14 +201,11 @@ async def show_user(collection_name: str, name: str):
     response_model_by_alias=False,
 )
 async def create_user(collection_name: str, user: UserModel = Body(...)):
-    """
-    Insert a new user record.
-
-    A unique `id` will be created and provided in the response.
-    """
-    collection = db.get_collection(collection_name)
-    new_user = await collection.insert_one(
-        user.model_dump(by_alias=True, exclude=["id"])
-    )
-    created_user = await collection.find_one({"_id": new_user.inserted_id})
-    return created_user
+    try:
+        collection = db.get_collection(collection_name)
+        new_user = await collection.insert_one(user.dict(exclude_unset=True, by_alias=True))
+        created_user = await collection.find_one({"_id": new_user.inserted_id})
+        return created_user
+    except Exception as e:
+        logger.error(f"Error occurred while creating user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
